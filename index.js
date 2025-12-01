@@ -15,7 +15,9 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-// ROUTES
+app.get("/", (req, res) => {
+  res.send("Hello World");
+});
 app.use("/api/auth", authRoutes);
 app.use("/api/bahan-keluar", bahanKeluarRoutes);
 app.use("/api/orders", bahanMasukRoutes);
