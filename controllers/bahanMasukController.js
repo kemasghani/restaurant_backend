@@ -15,7 +15,7 @@ export const createOrder = async (req, res) => {
   if (!bahan) return res.status(404).json({ message: "Bahan tidak ditemukan" });
 
   const { data, error: e2 } = await supabase
-    .from("order_bahan")
+    .from("bahan_masuk")
     .insert([
       {
         cabang_id,
@@ -40,12 +40,12 @@ export const listOrders = async (req, res) => {
   const user = req.user;
 
   let query = supabase
-    .from("order_bahan")
+    .from("bahan_masuk")
     .select(`
       *,
       bahan_baku (nama_bahan),
-      cabang:users!order_bahan_cabang_id_fkey (name),
-      supplier:users!order_bahan_action_by_fkey (name)
+      cabang:users!bahan_masuk_cabang_id_fkey (name),
+      supplier:users!bahan_masuk_action_by_fkey (name)
     `)
     .order("created_at", { ascending: false });
 
@@ -63,11 +63,11 @@ export const getOrder = async (req, res) => {
   const { id } = req.params;
 
   const { data, error } = await supabase
-    .from("order_bahan")
+    .from("bahan_masuk")
     .select(`
       *,
       bahan_baku (nama_bahan),
-      cabang:users!order_bahan_cabang_id_fkey (name)
+      cabang:users!bahan_masuk_cabang_id_fkey (name)
     `)
     .eq("id", id)
     .single();
@@ -83,7 +83,7 @@ export const acceptOrder = async (req, res) => {
   const supplierId = req.user.id;
 
   const { data: order, error: e1 } = await supabase
-    .from("order_bahan")
+    .from("bahan_masuk")
     .select("*")
     .eq("id", id)
     .single();
@@ -94,7 +94,7 @@ export const acceptOrder = async (req, res) => {
     return res.status(400).json({ message: "Order bukan status pending" });
 
   const { error: e2 } = await supabase
-    .from("order_bahan")
+    .from("bahan_masuk")
     .update({ status: "approved", action_by: supplierId, updated_at: new Date() })
     .eq("id", id);
 
@@ -107,7 +107,7 @@ export const rejectOrder = async (req, res) => {
   const supplierId = req.user.id;
 
   const { data: order, error: e1 } = await supabase
-    .from("order_bahan")
+    .from("bahan_masuk")
     .select("*")
     .eq("id", id)
     .single();
@@ -118,7 +118,7 @@ export const rejectOrder = async (req, res) => {
     return res.status(400).json({ message: "Order bukan status pending" });
 
   const { error: e2 } = await supabase
-    .from("order_bahan")
+    .from("bahan_masuk")
     .update({ status: "rejected", action_by: supplierId, updated_at: new Date() })
     .eq("id", id);
 
@@ -131,7 +131,7 @@ export const deliverOrder = async (req, res) => {
   const supplierId = req.user.id;
 
   const { data: order, error: e1 } = await supabase
-    .from("order_bahan")
+    .from("bahan_masuk")
     .select("*")
     .eq("id", id)
     .single();
@@ -144,7 +144,7 @@ export const deliverOrder = async (req, res) => {
     return res.status(400).json({ message: "Order harus disetujui sebelum dikirim" });
 
   const { error: e2 } = await supabase
-    .from("order_bahan")
+    .from("bahan_masuk")
     .update({ status: "delivered", updated_at: new Date() })
     .eq("id", id);
 
