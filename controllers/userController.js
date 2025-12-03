@@ -1,110 +1,98 @@
-// controllers/userController.js
-import db from "../config/db.js";
+import { supabase } from "../config/supabase.js";
 import bcrypt from "bcrypt";
 
-// ✅ Ambil semua user
 export const getAllUsers = async (req, res) => {
-    try {
-        const [rows] = await db.query(
-            "SELECT id, name, email, role, created_at FROM users ORDER BY id DESC"
-        );
-        res.json(rows);
-    } catch (err) {
-        console.error("❌ getAllUsers error:", err);
-        res.status(500).json({ message: "Gagal mengambil data user" });
-    }
+    const { data, error } = await supabase
+        .from("users")
+        .select("id, name, email, role, created_at")
+        .order("id", { ascending: false });
+
+    if (error) return res.status(500).json({ message: "Gagal mengambil data user" });
+    res.json(data);
 };
 
-// ✅ Tambah user baru
 export const addUser = async (req, res) => {
     const { name, email, password, role } = req.body;
 
-    if (!name || !email || !password || !role) {
+    if (!name || !email || !password || !role)
         return res.status(400).json({ message: "Semua field wajib diisi" });
-    }
 
-    try {
-        // Cek apakah email sudah digunakan
-        const [existing] = await db.query("SELECT id FROM users WHERE email = ?", [
-            email,
-        ]);
-        if (existing.length > 0) {
-            return res.status(400).json({ message: "Email sudah terdaftar" });
-        }
+    const { data: existing } = await supabase
+        .from("users")
+        .select("id")
+        .eq("email", email)
+        .limit(1);
 
-        const hashedPassword = await bcrypt.hash(password, 10);
-        await db.query(
-            "INSERT INTO users (name, email, password, role) VALUES (?, ?, ?, ?)",
-            [name, email, hashedPassword, role]
-        );
+    if (existing && existing.length > 0)
+        return res.status(400).json({ message: "Email sudah terdaftar" });
 
-        res.status(201).json({ message: "User berhasil ditambahkan" });
-    } catch (err) {
-        console.error("❌ addUser error:", err);
-        res.status(500).json({ message: "Gagal menambahkan user" });
-    }
+    const hashedPassword = await bcrypt.hash(password, 10);
+
+    const { error } = await supabase.from("users").insert([
+        { name, email, password: hashedPassword, role }
+    ]);
+
+    if (error) return res.status(500).json({ message: "Gagal menambahkan user" });
+    res.status(201).json({ message: "User berhasil ditambahkan" });
 };
 
-// ✅ Update user
 export const updateUser = async (req, res) => {
     const { id } = req.params;
     const { name, email, password, role } = req.body;
 
-    if (!name || !email || !role) {
+    if (!name || !email || !role)
         return res.status(400).json({ message: "Field wajib diisi" });
+
+    const { data: user } = await supabase
+        .from("users")
+        .select("*")
+        .eq("id", id)
+        .limit(1);
+
+    if (!user || user.length === 0)
+        return res.status(404).json({ message: "User tidak ditemukan" });
+
+    const { data: duplicate } = await supabase
+        .from("users")
+        .select("id")
+        .eq("email", email)
+        .neq("id", id);
+
+    if (duplicate && duplicate.length > 0)
+        return res.status(400).json({ message: "Email sudah digunakan user lain" });
+
+    let updatePayload = { name, email, role };
+
+    if (password && password.trim() !== "") {
+        updatePayload.password = await bcrypt.hash(password, 10);
     }
 
-    try {
-        // Cek user ada atau tidak
-        const [user] = await db.query("SELECT * FROM users WHERE id = ?", [id]);
-        if (user.length === 0) {
-            return res.status(404).json({ message: "User tidak ditemukan" });
-        }
+    const { error } = await supabase
+        .from("users")
+        .update(updatePayload)
+        .eq("id", id);
 
-        // Cek jika email baru sudah dipakai user lain
-        const [duplicate] = await db.query(
-            "SELECT id FROM users WHERE email = ? AND id != ?",
-            [email, id]
-        );
-        if (duplicate.length > 0) {
-            return res.status(400).json({ message: "Email sudah digunakan user lain" });
-        }
-
-        // Jika password diisi, hash ulang
-        if (password && password.trim() !== "") {
-            const hashedPassword = await bcrypt.hash(password, 10);
-            await db.query(
-                "UPDATE users SET name = ?, email = ?, password = ?, role = ? WHERE id = ?",
-                [name, email, hashedPassword, role, id]
-            );
-        } else {
-            await db.query(
-                "UPDATE users SET name = ?, email = ?, role = ? WHERE id = ?",
-                [name, email, role, id]
-            );
-        }
-
-        res.json({ message: "User berhasil diperbarui" });
-    } catch (err) {
-        console.error("❌ updateUser error:", err);
-        res.status(500).json({ message: "Gagal memperbarui user" });
-    }
+    if (error) return res.status(500).json({ message: "Gagal memperbarui user" });
+    res.json({ message: "User berhasil diperbarui" });
 };
 
-// ✅ Hapus user
 export const deleteUser = async (req, res) => {
     const { id } = req.params;
 
-    try {
-        const [user] = await db.query("SELECT id FROM users WHERE id = ?", [id]);
-        if (user.length === 0) {
-            return res.status(404).json({ message: "User tidak ditemukan" });
-        }
+    const { data: existing } = await supabase
+        .from("users")
+        .select("id")
+        .eq("id", id)
+        .limit(1);
 
-        await db.query("DELETE FROM users WHERE id = ?", [id]);
-        res.json({ message: "User berhasil dihapus" });
-    } catch (err) {
-        console.error("❌ deleteUser error:", err);
-        res.status(500).json({ message: "Gagal menghapus user" });
-    }
+    if (!existing || existing.length === 0)
+        return res.status(404).json({ message: "User tidak ditemukan" });
+
+    const { error } = await supabase
+        .from("users")
+        .delete()
+        .eq("id", id);
+
+    if (error) return res.status(500).json({ message: "Gagal menghapus user" });
+    res.json({ message: "User berhasil dihapus" });
 };

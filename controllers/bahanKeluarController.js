@@ -1,62 +1,51 @@
-import db from "../config/db.js";
+import supabase from "../config/db.js";
 
 export const listBahanKeluar = async (req, res) => {
-    try {
-        const [rows] = await db.query(`
-            SELECT bk.*, b.nama_bahan, u.name AS action_by_name
-            FROM bahan_keluar bk
-            JOIN bahan_baku b ON bk.bahan_id = b.id
-            LEFT JOIN users u ON bk.action_by = u.id
-            ORDER BY bk.created_at DESC
-        `);
-        res.json(rows);
-    } catch (err) {
-        console.error(err);
-        res.status(500).json({ message: err.message });
-    }
+  const { data, error } = await supabase
+    .from("bahan_keluar")
+    .select(`
+      *,
+      bahan_baku (nama_bahan),
+      users (name)
+    `)
+    .order("created_at", { ascending: false });
+
+  if (error) return res.status(500).json({ message: error.message });
+  res.json(data);
 };
 
 export const createBahanKeluar = async (req, res) => {
-    const { bahan_id, jumlah, keterangan } = req.body;
-    const user_id = req.user.id;
+  const { bahan_id, jumlah, keterangan } = req.body;
+  const user_id = req.user.id;
 
-    const conn = await db.getConnection(); 
+  const { data: bahan, error: e1 } = await supabase
+    .from("bahan_baku")
+    .select("stok")
+    .eq("id", bahan_id)
+    .single();
 
-    try {
-        await conn.beginTransaction();
+  if (e1) return res.status(500).json({ message: e1.message });
+  if (!bahan) return res.status(404).json({ message: "Bahan tidak ditemukan" });
+  if (bahan.stok < jumlah)
+    return res.status(400).json({ message: "Stok tidak mencukupi" });
 
-        // 1️⃣ Cek stok bahan
-        const [bahanRows] = await conn.query("SELECT stok FROM bahan_baku WHERE id = ?", [bahan_id]);
-        if (!bahanRows.length) {
-            throw new Error("Bahan tidak ditemukan");
-        }
+  const { error: e2 } = await supabase
+    .from("bahan_baku")
+    .update({ stok: bahan.stok - jumlah })
+    .eq("id", bahan_id);
 
-        const stokSekarang = bahanRows[0].stok;
-        if (stokSekarang < jumlah) {
-            throw new Error("Stok tidak mencukupi");
-        }
+  if (e2) return res.status(500).json({ message: e2.message });
 
-        // 2️⃣ Kurangi stok bahan
-        await conn.query("UPDATE bahan_baku SET stok = stok - ? WHERE id = ?", [jumlah, bahan_id]);
+  const { error: e3 } = await supabase.from("bahan_keluar").insert([
+    {
+      bahan_id,
+      jumlah,
+      keterangan: keterangan || null,
+      action_by: user_id,
+    },
+  ]);
 
-        // 3️⃣ Simpan ke tabel bahan_keluar
-        await conn.query(
-            `
-      INSERT INTO bahan_keluar (bahan_id, jumlah, keterangan, action_by)
-      VALUES (?, ?, ?, ?)
-      `,
-            [bahan_id, jumlah, keterangan || null, user_id]
-        );
+  if (e3) return res.status(500).json({ message: e3.message });
 
-        await conn.commit(); // ✅ commit transaksi
-
-        res.json({ message: "Bahan keluar berhasil ditambahkan" });
-    } catch (err) {
-        await conn.rollback(); // ❌ rollback jika error
-        console.error("❌ Error createBahanKeluar:", err);
-        res.status(500).json({ message: err.message });
-    } finally {
-        conn.release(); // 🔁 kembalikan koneksi ke pool
-    }
+  res.json({ message: "Bahan keluar berhasil ditambahkan" });
 };
-

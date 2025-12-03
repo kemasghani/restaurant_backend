@@ -1,110 +1,99 @@
-import db from "../config/db.js";
+import { supabase } from "../config/supabase.js";
 
-// ✅ Ambil semua kategori bahan
 export const getAllKategori = async (req, res) => {
-    try {
-        const [rows] = await db.query(
-            "SELECT * FROM kategori_bahan ORDER BY id DESC"
-        );
-        res.json(rows);
-    } catch (err) {
-        console.error("❌ getAllKategori error:", err);
-        res.status(500).json({ message: "Gagal mengambil data kategori bahan" });
-    }
+    const { data, error } = await supabase
+        .from("kategori_bahan")
+        .select("*")
+        .order("id", { ascending: false });
+
+    if (error) return res.status(500).json({ message: "Gagal mengambil data kategori bahan" });
+    res.json(data);
 };
 
-// ✅ Tambah kategori bahan baru
 export const addKategori = async (req, res) => {
     const { nama_kategori } = req.body;
 
-    if (!nama_kategori || nama_kategori.trim() === "") {
+    if (!nama_kategori || nama_kategori.trim() === "")
         return res.status(400).json({ message: "Nama kategori wajib diisi" });
-    }
 
-    try {
-        // Cek apakah nama sudah ada
-        const [existing] = await db.query(
-            "SELECT id FROM kategori_bahan WHERE nama_kategori = ?",
-            [nama_kategori]
-        );
-        if (existing.length > 0) {
-            return res.status(400).json({ message: "Kategori sudah ada" });
-        }
+    const { data: existing } = await supabase
+        .from("kategori_bahan")
+        .select("id")
+        .eq("nama_kategori", nama_kategori)
+        .limit(1);
 
-        await db.query(
-            "INSERT INTO kategori_bahan (nama_kategori) VALUES (?, ?)",
-            [nama_kategori]
-        );
-        res.json({ message: "Kategori bahan berhasil ditambahkan" });
-    } catch (err) {
-        console.error("❌ addKategori error:", err);
-        res.status(500).json({ message: "Gagal menambahkan kategori bahan" });
-    }
+    if (existing && existing.length > 0)
+        return res.status(400).json({ message: "Kategori sudah ada" });
+
+    const { error } = await supabase
+        .from("kategori_bahan")
+        .insert([{ nama_kategori }]);
+
+    if (error) return res.status(500).json({ message: "Gagal menambahkan kategori bahan" });
+    res.json({ message: "Kategori bahan berhasil ditambahkan" });
 };
 
-// ✅ Update kategori bahan
 export const updateKategori = async (req, res) => {
     const { id } = req.params;
     const { nama_kategori } = req.body;
 
-    if (!nama_kategori || nama_kategori.trim() === "") {
+    if (!nama_kategori || nama_kategori.trim() === "")
         return res.status(400).json({ message: "Nama kategori wajib diisi" });
-    }
 
-    try {
-        // Pastikan data ada
-        const [existing] = await db.query("SELECT * FROM kategori_bahan WHERE id = ?", [id]);
-        if (existing.length === 0) {
-            return res.status(404).json({ message: "Kategori tidak ditemukan" });
-        }
+    const { data: existing } = await supabase
+        .from("kategori_bahan")
+        .select("*")
+        .eq("id", id)
+        .limit(1);
 
-        // Cek duplikasi nama (kecuali dirinya sendiri)
-        const [duplicate] = await db.query(
-            "SELECT id FROM kategori_bahan WHERE nama_kategori = ? AND id != ?",
-            [nama_kategori, id]
-        );
-        if (duplicate.length > 0) {
-            return res.status(400).json({ message: "Nama kategori sudah digunakan" });
-        }
+    if (!existing || existing.length === 0)
+        return res.status(404).json({ message: "Kategori tidak ditemukan" });
 
-        await db.query(
-            "UPDATE kategori_bahan SET nama_kategori = ? WHERE id = ?",
-            [nama_kategori, id]
-        );
+    const { data: duplicate } = await supabase
+        .from("kategori_bahan")
+        .select("id")
+        .eq("nama_kategori", nama_kategori)
+        .neq("id", id)
+        .limit(1);
 
-        res.json({ message: "Kategori bahan berhasil diperbarui" });
-    } catch (err) {
-        console.error("❌ updateKategori error:", err);
-        res.status(500).json({ message: "Gagal memperbarui kategori bahan" });
-    }
+    if (duplicate && duplicate.length > 0)
+        return res.status(400).json({ message: "Nama kategori sudah digunakan" });
+
+    const { error } = await supabase
+        .from("kategori_bahan")
+        .update({ nama_kategori })
+        .eq("id", id);
+
+    if (error) return res.status(500).json({ message: "Gagal memperbarui kategori bahan" });
+    res.json({ message: "Kategori bahan berhasil diperbarui" });
 };
 
-// ✅ Hapus kategori bahan
 export const deleteKategori = async (req, res) => {
     const { id } = req.params;
 
-    try {
-        // Pastikan data ada
-        const [existing] = await db.query("SELECT * FROM kategori_bahan WHERE id = ?", [id]);
-        if (existing.length === 0) {
-            return res.status(404).json({ message: "Kategori tidak ditemukan" });
-        }
+    const { data: existing } = await supabase
+        .from("kategori_bahan")
+        .select("id")
+        .eq("id", id)
+        .limit(1);
 
-        // Cek apakah kategori masih digunakan di bahan_baku
-        const [used] = await db.query(
-            "SELECT id FROM bahan_baku WHERE kategori_id = ? LIMIT 1",
-            [id]
-        );
-        if (used.length > 0) {
-            return res
-                .status(400)
-                .json({ message: "Kategori ini masih digunakan di data bahan baku" });
-        }
+    if (!existing || existing.length === 0)
+        return res.status(404).json({ message: "Kategori tidak ditemukan" });
 
-        await db.query("DELETE FROM kategori_bahan WHERE id = ?", [id]);
-        res.json({ message: "Kategori bahan berhasil dihapus" });
-    } catch (err) {
-        console.error("❌ deleteKategori error:", err);
-        res.status(500).json({ message: "Gagal menghapus kategori bahan" });
-    }
+    const { data: used } = await supabase
+        .from("bahan_baku")
+        .select("id")
+        .eq("kategori_id", id)
+        .limit(1);
+
+    if (used && used.length > 0)
+        return res.status(400).json({ message: "Kategori ini masih digunakan di data bahan baku" });
+
+    const { error } = await supabase
+        .from("kategori_bahan")
+        .delete()
+        .eq("id", id);
+
+    if (error) return res.status(500).json({ message: "Gagal menghapus kategori bahan" });
+    res.json({ message: "Kategori bahan berhasil dihapus" });
 };

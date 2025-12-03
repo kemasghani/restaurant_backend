@@ -1,177 +1,161 @@
-// controllers/orderController.js
-import db from "../config/db.js";
+import supabase from "../config/db.js";
 
 export const createOrder = async (req, res) => {
-    const { bahan_id, jumlah } = req.body;
-    const cabang_id = req.user.id;
+  const { bahan_id, jumlah } = req.body;
+  const cabang_id = req.user.id;
 
-    try {
-        // Ambil harga bahan
-        const [bahanRows] = await db.query("SELECT harga FROM bahan_baku WHERE id = ?", [bahan_id]);
-        if (!bahanRows[0]) return res.status(404).json({ message: "Bahan tidak ditemukan" });
+  // pastikan bahan ada
+  const { data: bahan, error: e1 } = await supabase
+    .from("bahan_baku")
+    .select("id")
+    .eq("id", bahan_id)
+    .single();
 
-        const harga = bahanRows[0].harga || 0;
-        const subtotal = Number(jumlah) * Number(harga);
+  if (e1) return res.status(500).json({ message: e1.message });
+  if (!bahan) return res.status(404).json({ message: "Bahan tidak ditemukan" });
 
-        const randomLetters = Math.random().toString(36).substring(2, 5).toUpperCase(); // 3 huruf acak
-        const datePart = new Date()
-            .toISOString()
-            .replace(/[-:TZ.]/g, "")
-            .slice(2, 12); // YYMMDDHHMM
-        const kode_order = `${randomLetters}${datePart}`;
+  const { data, error: e2 } = await supabase
+    .from("order_bahan")
+    .insert([
+      {
+        cabang_id,
+        bahan_id,
+        jumlah,
+        status: "pending",
+        action_by: null,
+      },
+    ])
+    .select()
+    .single();
 
-        // Pastikan kode_order unik
-        const [existing] = await db.query("SELECT id FROM order_bahan WHERE kode_order = ?", [kode_order]);
-        if (existing.length > 0) {
-            return res.status(400).json({ message: "Gagal membuat order, kode duplikat. Coba lagi." });
-        }
+  if (e2) return res.status(500).json({ message: e2.message });
 
-        // Insert data order
-        const [result] = await db.query(
-            `INSERT INTO order_bahan (kode_order, cabang_id, bahan_id, jumlah, total_harga, status, action_by)
-             VALUES (?, ?, ?, ?, ?, ?, ?)`,
-            [kode_order, cabang_id, bahan_id, jumlah, subtotal, 'pending', null]
-        );
-
-        res.status(201).json({ message: "Order dibuat", orderId: result.insertId, kode_order });
-    } catch (err) {
-        console.error(err);
-        res.status(500).json({ message: err.message });
-    }
+  res.status(201).json({
+    message: "Order dibuat",
+    orderId: data.id,
+  });
 };
-
 
 export const listOrders = async (req, res) => {
-    const user = req.user;
-    try {
-        let rows;
-        console.log("✅ Detected user role:", user.role);
+  const user = req.user;
 
-        if (user.role === "cabang") {
-            console.log("➡️ Masuk ke kondisi CABANG");
-            const [r] = await db.query(
-                `SELECT
-                    o.*,
-                    b.nama_bahan,
-                    u2.name AS supplier_name
-                 FROM order_bahan o
-                 JOIN bahan_baku b ON o.bahan_id = b.id
-                 LEFT JOIN users u2 ON o.action_by = u2.id
-                 WHERE o.cabang_id = ?
-                 ORDER BY o.created_at DESC`,
-                [user.id]
-            );
-            rows = r;
-        } else {
-            console.log("➡️ Masuk ke kondisi ADMIN / DEFAULT");
-            const [r] = await db.query(
-                `SELECT
-                    o.*,
-                    b.nama_bahan,
-                    u.name AS cabang_name,
-                    u2.name AS supplier_name
-                 FROM order_bahan o
-                 JOIN bahan_baku b ON o.bahan_id = b.id
-                 LEFT JOIN users u ON o.cabang_id = u.id
-                 LEFT JOIN users u2 ON o.action_by = u2.id
-                 ORDER BY o.created_at DESC`
-            );
-            rows = r;
-        }
-        res.json(rows);
-    } catch (err) {
-        console.error("❌ listOrders error:", err);
-        res.status(500).json({ message: err.message });
-    }
+  let query = supabase
+    .from("order_bahan")
+    .select(`
+      *,
+      bahan_baku (nama_bahan),
+      cabang:users!order_bahan_cabang_id_fkey (name),
+      supplier:users!order_bahan_action_by_fkey (name)
+    `)
+    .order("created_at", { ascending: false });
+
+  if (user.role === "cabang") {
+    query = query.eq("cabang_id", user.id);
+  }
+
+  const { data, error } = await query;
+
+  if (error) return res.status(500).json({ message: error.message });
+  res.json(data);
 };
-
 
 export const getOrder = async (req, res) => {
-    const { id } = req.params;
-    try {
-        const [rows] = await db.query(
-            `SELECT o.*, b.nama_bahan, u.name as cabang_name
-             FROM order_bahan o
-             JOIN bahan_baku b ON o.bahan_id = b.id
-             LEFT JOIN users u ON o.cabang_id = u.id
-             WHERE o.id = ?`,
-            [id]
-        );
-        if (!rows[0]) return res.status(404).json({ message: "Order not found" });
-        res.json(rows[0]);
-    } catch (err) {
-        console.error(err);
-        res.status(500).json({ message: err.message });
-    }
+  const { id } = req.params;
+
+  const { data, error } = await supabase
+    .from("order_bahan")
+    .select(`
+      *,
+      bahan_baku (nama_bahan),
+      cabang:users!order_bahan_cabang_id_fkey (name)
+    `)
+    .eq("id", id)
+    .single();
+
+  if (error) return res.status(500).json({ message: error.message });
+  if (!data) return res.status(404).json({ message: "Order not found" });
+
+  res.json(data);
 };
 
-// supplier accept order
 export const acceptOrder = async (req, res) => {
-    const { id } = req.params;
-    const supplierId = req.user.id;
+  const { id } = req.params;
+  const supplierId = req.user.id;
 
-    try {
-        const [orders] = await db.query("SELECT * FROM order_bahan WHERE id = ?", [id]);
-        const order = orders[0];
-        if (!order) return res.status(404).json({ message: "Order not found" });
-        if (order.status !== "pending") return res.status(400).json({ message: "Order bukan status pending" });
+  const { data: order, error: e1 } = await supabase
+    .from("order_bahan")
+    .select("*")
+    .eq("id", id)
+    .single();
 
-        await db.query(
-            "UPDATE order_bahan SET status = 'approved', action_by = ?, updated_at = NOW() WHERE id = ?",
-            [supplierId, id]
-        );
+  if (e1) return res.status(500).json({ message: e1.message });
+  if (!order) return res.status(404).json({ message: "Order not found" });
+  if (order.status !== "pending")
+    return res.status(400).json({ message: "Order bukan status pending" });
 
-        res.json({ message: "Order diterima" });
-    } catch (err) {
-        console.error(err);
-        res.status(500).json({ message: err.message });
-    }
+  const { error: e2 } = await supabase
+    .from("order_bahan")
+    .update({ status: "approved", action_by: supplierId, updated_at: new Date() })
+    .eq("id", id);
+
+  if (e2) return res.status(500).json({ message: e2.message });
+  res.json({ message: "Order diterima" });
 };
 
 export const rejectOrder = async (req, res) => {
-    const { id } = req.params;
-    const supplierId = req.user.id;
+  const { id } = req.params;
+  const supplierId = req.user.id;
 
-    try {
-        const [orders] = await db.query("SELECT * FROM order_bahan WHERE id = ?", [id]);
-        const order = orders[0];
-        if (!order) return res.status(404).json({ message: "Order not found" });
-        if (order.status !== "pending") return res.status(400).json({ message: "Order bukan status pending" });
+  const { data: order, error: e1 } = await supabase
+    .from("order_bahan")
+    .select("*")
+    .eq("id", id)
+    .single();
 
-        await db.query(
-            "UPDATE order_bahan SET status = 'rejected', action_by = ?, updated_at = NOW() WHERE id = ?",
-            [supplierId, id]
-        );
+  if (e1) return res.status(500).json({ message: e1.message });
+  if (!order) return res.status(404).json({ message: "Order not found" });
+  if (order.status !== "pending")
+    return res.status(400).json({ message: "Order bukan status pending" });
 
-        res.json({ message: "Order ditolak" });
-    } catch (err) {
-        console.error(err);
-        res.status(500).json({ message: err.message });
-    }
+  const { error: e2 } = await supabase
+    .from("order_bahan")
+    .update({ status: "rejected", action_by: supplierId, updated_at: new Date() })
+    .eq("id", id);
+
+  if (e2) return res.status(500).json({ message: e2.message });
+  res.json({ message: "Order ditolak" });
 };
 
 export const deliverOrder = async (req, res) => {
-    const { id } = req.params;
-    const supplierId = req.user.id;
+  const { id } = req.params;
+  const supplierId = req.user.id;
 
-    try {
-        const [orders] = await db.query("SELECT * FROM order_bahan WHERE id = ?", [id]);
-        const order = orders[0];
-        if (!order) return res.status(404).json({ message: "Order not found" });
-        if (order.supplier_id !== supplierId) return res.status(403).json({ message: "Bukan order milik supplier" });
-        if (order.status !== "approved") return res.status(400).json({ message: "Order harus disetujui sebelum dikirim" });
+  const { data: order, error: e1 } = await supabase
+    .from("order_bahan")
+    .select("*")
+    .eq("id", id)
+    .single();
 
-        await db.query(
-            "UPDATE order_bahan SET status = 'delivered', action_by = ?, updated_at = NOW() WHERE id = ?",
-            [supplierId, id]
-        );
+  if (e1) return res.status(500).json({ message: e1.message });
+  if (!order) return res.status(404).json({ message: "Order not found" });
+  if (order.action_by !== supplierId)
+    return res.status(403).json({ message: "Bukan order milik supplier" });
+  if (order.status !== "approved")
+    return res.status(400).json({ message: "Order harus disetujui sebelum dikirim" });
 
-        // update stok bahan
-        await db.query("UPDATE bahan_baku SET stok = stok + ? WHERE id = ?", [order.jumlah, order.bahan_id]);
+  const { error: e2 } = await supabase
+    .from("order_bahan")
+    .update({ status: "delivered", updated_at: new Date() })
+    .eq("id", id);
 
-        res.json({ message: "Order dikirim dan stok diperbarui" });
-    } catch (err) {
-        console.error(err);
-        res.status(500).json({ message: err.message });
-    }
+  if (e2) return res.status(500).json({ message: e2.message });
+
+  const { error: e3 } = await supabase
+    .from("bahan_baku")
+    .update({ stok: order.jumlah + (order.stok || 0) })
+    .eq("id", order.bahan_id);
+
+  if (e3) return res.status(500).json({ message: e3.message });
+
+  res.json({ message: "Order dikirim dan stok diperbarui" });
 };

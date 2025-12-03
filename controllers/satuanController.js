@@ -1,86 +1,80 @@
-// controllers/satuanController.js
-import db from "../config/db.js";
+import { supabase } from "../config/supabase.js";
 
-// ✅ Ambil semua satuan
 export const getAllSatuan = async (req, res) => {
-    try {
-        const [rows] = await db.query("SELECT * FROM satuan_bahan ORDER BY id DESC");
-        res.json(rows);
-    } catch (err) {
-        console.error("❌ getAllSatuan error:", err);
-        res.status(500).json({ message: "Gagal mengambil data satuan" });
-    }
+    const { data, error } = await supabase
+        .from("satuan_bahan")
+        .select("*")
+        .order("id", { ascending: false });
+
+    if (error) return res.status(500).json({ message: "Gagal mengambil data satuan" });
+    res.json(data);
 };
 
-// ✅ Tambah satuan baru
 export const addSatuan = async (req, res) => {
     const { nama_satuan, keterangan } = req.body;
 
-    if (!nama_satuan || nama_satuan.trim() === "") {
+    if (!nama_satuan || nama_satuan.trim() === "")
         return res.status(400).json({ message: "Nama satuan wajib diisi" });
-    }
 
-    try {
-        // Cek apakah nama sudah ada
-        const [existing] = await db.query(
-            "SELECT id FROM satuan_bahan WHERE nama_satuan = ?",
-            [nama_satuan]
-        );
-        if (existing.length > 0) {
-            return res.status(400).json({ message: "Nama satuan sudah digunakan" });
-        }
+    const { data: existing } = await supabase
+        .from("satuan_bahan")
+        .select("id")
+        .eq("nama_satuan", nama_satuan)
+        .limit(1);
 
-        await db.query(
-            "INSERT INTO satuan_bahan (nama_satuan, keterangan) VALUES (?, ?)",
-            [nama_satuan, keterangan || null]
-        );
-        res.status(201).json({ message: "Satuan berhasil ditambahkan" });
-    } catch (err) {
-        console.error("❌ addSatuan error:", err);
-        res.status(500).json({ message: "Gagal menambahkan satuan" });
-    }
+    if (existing && existing.length > 0)
+        return res.status(400).json({ message: "Nama satuan sudah digunakan" });
+
+    const { error } = await supabase
+        .from("satuan_bahan")
+        .insert([{ nama_satuan, keterangan: keterangan || null }]);
+
+    if (error) return res.status(500).json({ message: "Gagal menambahkan satuan" });
+    res.status(201).json({ message: "Satuan berhasil ditambahkan" });
 };
 
-// ✅ Edit satuan
 export const updateSatuan = async (req, res) => {
     const { id } = req.params;
     const { nama_satuan, keterangan } = req.body;
 
-    if (!nama_satuan || nama_satuan.trim() === "") {
+    if (!nama_satuan || nama_satuan.trim() === "")
         return res.status(400).json({ message: "Nama satuan wajib diisi" });
-    }
 
-    try {
-        const [existing] = await db.query("SELECT id FROM satuan_bahan WHERE id = ?", [id]);
-        if (existing.length === 0) {
-            return res.status(404).json({ message: "Satuan tidak ditemukan" });
-        }
+    const { data: existing } = await supabase
+        .from("satuan_bahan")
+        .select("id")
+        .eq("id", id)
+        .limit(1);
 
-        await db.query(
-            "UPDATE satuan_bahan SET nama_satuan = ?, keterangan = ? WHERE id = ?",
-            [nama_satuan, keterangan || null, id]
-        );
-        res.json({ message: "Satuan berhasil diperbarui" });
-    } catch (err) {
-        console.error("❌ updateSatuan error:", err);
-        res.status(500).json({ message: "Gagal memperbarui satuan" });
-    }
+    if (!existing || existing.length === 0)
+        return res.status(404).json({ message: "Satuan tidak ditemukan" });
+
+    const { error } = await supabase
+        .from("satuan_bahan")
+        .update({ nama_satuan, keterangan: keterangan || null })
+        .eq("id", id);
+
+    if (error) return res.status(500).json({ message: "Gagal memperbarui satuan" });
+    res.json({ message: "Satuan berhasil diperbarui" });
 };
 
-// ✅ Hapus satuan
 export const deleteSatuan = async (req, res) => {
     const { id } = req.params;
 
-    try {
-        const [existing] = await db.query("SELECT id FROM satuan_bahan WHERE id = ?", [id]);
-        if (existing.length === 0) {
-            return res.status(404).json({ message: "Satuan tidak ditemukan" });
-        }
+    const { data: existing } = await supabase
+        .from("satuan_bahan")
+        .select("id")
+        .eq("id", id)
+        .limit(1);
 
-        await db.query("DELETE FROM satuan_bahan WHERE id = ?", [id]);
-        res.json({ message: "Satuan berhasil dihapus" });
-    } catch (err) {
-        console.error("❌ deleteSatuan error:", err);
-        res.status(500).json({ message: "Gagal menghapus satuan" });
-    }
+    if (!existing || existing.length === 0)
+        return res.status(404).json({ message: "Satuan tidak ditemukan" });
+
+    const { error } = await supabase
+        .from("satuan_bahan")
+        .delete()
+        .eq("id", id);
+
+    if (error) return res.status(500).json({ message: "Gagal menghapus satuan" });
+    res.json({ message: "Satuan berhasil dihapus" });
 };

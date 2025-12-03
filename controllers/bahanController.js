@@ -1,76 +1,77 @@
-import db from "../config/db.js";
+import supabase from "../config/db.js";
 
-// ✅ Ambil semua bahan
 export const getAllBahan = async (req, res) => {
-    try {
-        const [rows] = await db.query(
-            `SELECT b.*, k.nama_kategori, s.nama_satuan
-       FROM bahan_baku b
-       LEFT JOIN kategori_bahan k ON b.kategori_id = k.id
-       LEFT JOIN satuan_bahan s ON b.satuan_id = s.id
-       ORDER BY b.id DESC`
-        );
-        res.json(rows);
-    } catch (err) {
-        res.status(500).json({ message: err.message });
-    }
+  const { data, error } = await supabase
+    .from("bahan_baku")
+    .select(`
+      *,
+      kategori_bahan (nama_kategori),
+      satuan_bahan (nama_satuan)
+    `)
+    .order("id", { ascending: false });
+
+  if (error) return res.status(500).json({ message: error.message });
+  res.json(data);
 };
 
-// ✅ Tambah bahan baru
 export const addBahan = async (req, res) => {
-    const { nama_bahan, kategori_id, satuan_id, stok } = req.body;
-    const userId = req.user.id;
-    try {
-        await db.query(
-            `INSERT INTO bahan_baku (nama_bahan, kategori_id, satuan_id, stok, created_by)
-       VALUES (?, ?, ?, ?, ?)`,
-            [nama_bahan, kategori_id, satuan_id, stok, userId]
-        );
-        res.status(201).json({ message: "Bahan baku berhasil ditambahkan" });
-    } catch (err) {
-        res.status(500).json({ message: err.message });
-    }
+  const { nama_bahan, kategori_id, satuan_id, stok } = req.body;
+  const userId = req.user.id;
+
+  const { error } = await supabase.from("bahan_baku").insert([
+    {
+      nama_bahan,
+      kategori_id,
+      satuan_id,
+      stok,
+      created_by: userId,
+    },
+  ]);
+
+  if (error) return res.status(500).json({ message: error.message });
+  res.status(201).json({ message: "Bahan baku berhasil ditambahkan" });
 };
 
-// ✅ Update bahan
 export const updateBahan = async (req, res) => {
-    const { id } = req.params;
-    const { nama_bahan, kategori_id, satuan_id, stok } = req.body;
+  const { id } = req.params;
+  const { nama_bahan, kategori_id, satuan_id, stok, stok_minimal } = req.body;
 
-    try {
-        // pastikan bahan ada
-        const [existing] = await db.query("SELECT id FROM bahan_baku WHERE id = ?", [id]);
-        if (existing.length === 0) {
-            return res.status(404).json({ message: "Bahan tidak ditemukan" });
-        }
+  const { data: existing } = await supabase
+    .from("bahan_baku")
+    .select("id")
+    .eq("id", id)
+    .single();
 
-        await db.query(
-            `UPDATE bahan_baku
-       SET nama_bahan = ?, kategori_id = ?, satuan_id = ?, stok = ?
-       WHERE id = ?`,
-            [nama_bahan, kategori_id, satuan_id, stok, id]
-        );
+  if (!existing) return res.status(404).json({ message: "Bahan tidak ditemukan" });
 
-        res.json({ message: "Bahan baku berhasil diperbarui" });
-    } catch (err) {
-        res.status(500).json({ message: err.message });
-    }
+  const { error } = await supabase
+    .from("bahan_baku")
+    .update({
+      nama_bahan,
+      kategori_id,
+      satuan_id,
+      stok,
+      stok_minimal,
+    })
+    .eq("id", id);
+
+  if (error) return res.status(500).json({ message: error.message });
+  res.json({ message: "Bahan baku berhasil diperbarui" });
 };
 
-// ✅ Hapus bahan
 export const deleteBahan = async (req, res) => {
-    const { id } = req.params;
+  const { id } = req.params;
 
-    try {
-        // pastikan bahan ada
-        const [existing] = await db.query("SELECT id FROM bahan_baku WHERE id = ?", [id]);
-        if (existing.length === 0) {
-            return res.status(404).json({ message: "Bahan tidak ditemukan" });
-        }
+  const { data: existing } = await supabase
+    .from("bahan_baku")
+    .select("id")
+    .eq("id", id)
+    .single();
 
-        await db.query("DELETE FROM bahan_baku WHERE id = ?", [id]);
-        res.json({ message: "Bahan baku berhasil dihapus" });
-    } catch (err) {
-        res.status(500).json({ message: err.message });
-    }
+  if (!existing) return res.status(404).json({ message: "Bahan tidak ditemukan" });
+
+  const { error } = await supabase.from("bahan_baku").delete().eq("id", id);
+
+  if (error) return res.status(500).json({ message: error.message });
+  res.json({ message: "Bahan baku berhasil dihapus" });
 };
