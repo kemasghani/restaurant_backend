@@ -1,4 +1,4 @@
-import { supabase } from "../config/db.js";
+import supabase from "../config/db.js";
 import bcrypt from "bcrypt";
 
 export const getAllUsers = async (req, res) => {
