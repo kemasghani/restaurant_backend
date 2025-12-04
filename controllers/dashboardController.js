@@ -47,7 +47,7 @@ export const getBranchOrderStats = async (req, res) => {
         bahan:bahan_baku(nama_bahan, satuan:satuan_bahan(nama_satuan)),
         cabang:users!bahan_masuk_cabang_id_fkey(id, name)
       `)
-      .in('status', ['approved', 'delivered']); // Hanya hitung yang valid
+      .in('status', ['disetujui', 'delivered']); // Hanya hitung yang valid
 
     if (error) throw error;
 
