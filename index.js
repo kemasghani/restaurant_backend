@@ -9,6 +9,7 @@ import bahanKeluarRoutes from "./routes/bahanKeluarRoutes.js";
 import satuanRoutes from "./routes/satuanRoutes.js";
 import kategoriRoutes from "./routes/kategoriRoutes.js";
 import userRoutes from "./routes/userRoutes.js";
+import dashboardRoutes from "./routes/dashboardRoutes.js";
 
 dotenv.config();
 const app = express();
@@ -25,6 +26,7 @@ app.use("/api/bahan", bahanRoutes);
 app.use("/api/satuan", satuanRoutes);
 app.use("/api/kategori", kategoriRoutes);
 app.use("/api/users", userRoutes);
+app.use("/api/dashboard", dashboardRoutes);
 
 // ❌ REMOVE app.listen()
 // ❌ Vercel doesn't allow custom servers
