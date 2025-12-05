@@ -1,6 +1,5 @@
 import supabase from "../config/db.js";
 
-import supabase from "../config/db.js";
 
 export const getAllBahan = async (req, res) => {
   const user = req.user; // Pastikan middleware auth sudah berjalan
