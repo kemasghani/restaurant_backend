@@ -15,7 +15,8 @@ export const getAllBahan = async (req, res) => {
 };
 
 export const addBahan = async (req, res) => {
-  const { nama_bahan, kategori_id, satuan_id, stok } = req.body;
+  // Removed 'stok' from input, added 'stok_minimal'
+  const { nama_bahan, kategori_id, satuan_id, stok_minimal } = req.body;
   const userId = req.user.id;
 
   const { error } = await supabase.from("bahan_baku").insert([
@@ -23,7 +24,8 @@ export const addBahan = async (req, res) => {
       nama_bahan,
       kategori_id,
       satuan_id,
-      stok,
+      stok: 0, // Auto set stok to 0
+      stok_minimal: stok_minimal || 0, // Default to 0 if not provided
       created_by: userId,
     },
   ]);
@@ -34,7 +36,8 @@ export const addBahan = async (req, res) => {
 
 export const updateBahan = async (req, res) => {
   const { id } = req.params;
-  const { nama_bahan, kategori_id, satuan_id, stok, stok_minimal } = req.body;
+  // Removed 'stok' from input so it cannot be edited here
+  const { nama_bahan, kategori_id, satuan_id, stok_minimal } = req.body;
 
   const { data: existing } = await supabase
     .from("bahan_baku")
@@ -50,8 +53,7 @@ export const updateBahan = async (req, res) => {
       nama_bahan,
       kategori_id,
       satuan_id,
-      stok,
-      stok_minimal,
+      stok_minimal, // Only update stok_minimal
     })
     .eq("id", id);
 
