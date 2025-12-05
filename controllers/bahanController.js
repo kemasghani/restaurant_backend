@@ -1,7 +1,12 @@
 import supabase from "../config/db.js";
 
+import supabase from "../config/db.js";
+
 export const getAllBahan = async (req, res) => {
-  const { data, error } = await supabase
+  const user = req.user; // Pastikan middleware auth sudah berjalan
+
+  // 1. Ambil Data Master Bahan Baku (Global)
+  let { data: bahanData, error } = await supabase
     .from("bahan_baku")
     .select(`
       *,
@@ -11,7 +16,41 @@ export const getAllBahan = async (req, res) => {
     .order("id", { ascending: false });
 
   if (error) return res.status(500).json({ message: error.message });
-  res.json(data);
+
+  // 2. Logika Khusus Jika Role = 'cabang'
+  if (user.role === "cabang") {
+    // Ambil data bahan_masuk khusus untuk cabang ini (berdasarkan user.id)
+    const { data: logMasuk, error: errMasuk } = await supabase
+      .from("bahan_masuk")
+      .select("bahan_id, jumlah")
+      .eq("cabang_id", user.id); // Filter berdasarkan ID cabang
+
+    if (errMasuk) return res.status(500).json({ message: errMasuk.message });
+
+    // Hitung total stok per bahan
+    // Kita buat Dictionary/Map agar proses pencarian cepat: { bahan_id: total_stok }
+    const stokCabangMap = {};
+    
+    if (logMasuk) {
+      logMasuk.forEach((item) => {
+        if (!stokCabangMap[item.bahan_id]) {
+          stokCabangMap[item.bahan_id] = 0;
+        }
+        stokCabangMap[item.bahan_id] += item.jumlah;
+      });
+    }
+
+    // Replace nilai 'stok' global dengan stok hitungan cabang
+    bahanData = bahanData.map((bahan) => {
+      return {
+        ...bahan,
+        // Jika ada di map ambil nilainya, jika tidak ada berarti 0
+        stok: stokCabangMap[bahan.id] || 0 
+      };
+    });
+  }
+
+  res.json(bahanData);
 };
 
 export const addBahan = async (req, res) => {

@@ -1,99 +1,76 @@
 import supabase from "../config/db.js";
 
-// --- 1. NOTIFIKASI STOK MENIPIS (LOW STOCK ALERT) ---
+// --- 1. NOTIFIKASI STOK MENIPIS (GUDANG PUSAT & CABANG) ---
 export const getLowStockAlerts = async (req, res) => {
   try {
-    // Ambil semua bahan baku
-    const { data: bahan, error } = await supabase
-      .from("bahan_baku")
-      .select("id, nama_bahan, stok, stok_minimal, satuan:satuan_bahan(nama_satuan)");
+    // 1. Ambil Data Master (Bahan, Cabang, Transaksi) secara paralel agar cepat
+    const [bahanRes, cabangRes, masukRes, keluarRes] = await Promise.all([
+      supabase.from("bahan_baku").select("id, nama_bahan, stok, stok_minimal, satuan:satuan_bahan(nama_satuan)"),
+      supabase.from("users").select("id, name").eq("role", "cabang"),
+      supabase.from("bahan_masuk").select("bahan_id, cabang_id, jumlah"),
+      supabase.from("bahan_keluar").select("bahan_id, action_by, jumlah")
+    ]);
 
-    if (error) throw error;
+    if (bahanRes.error) throw bahanRes.error;
+    if (cabangRes.error) throw cabangRes.error;
 
-    // Filter logic: Cari yang stok <= stok_minimal
-    // Kita filter di level JS karena membandingkan dua kolom (col A <= col B) 
-    // di query builder standar Supabase sedikit rumit tanpa RPC.
-    const lowStockItems = bahan.filter((item) => item.stok <= item.stok_minimal);
+    const allAlerts = [];
+    const bahanList = bahanRes.data;
+    const cabangList = cabangRes.data;
+    const logMasuk = masukRes.data || [];
+    const logKeluar = keluarRes.data || [];
 
-    res.json({
-      message: "Data stok menipis berhasil diambil",
-      total_alerts: lowStockItems.length,
-      data: lowStockItems.map(item => ({
-        id: item.id,
-        nama_bahan: item.nama_bahan,
-        sisa_stok: item.stok,
-        batas_minimum: item.stok_minimal,
-        satuan: item.satuan?.nama_satuan,
-        status: item.stok === 0 ? "HABIS" : "MENIPIS" // Status tambahan
-      }))
+    // --- A. CEK STOK GUDANG PUSAT (Dari tabel bahan_baku) ---
+    bahanList.forEach((item) => {
+      if (item.stok <= item.stok_minimal) {
+        allAlerts.push({
+          lokasi: "GUDANG PUSAT",
+          cabang_id: null,
+          nama_bahan: item.nama_bahan,
+          sisa_stok: item.stok,
+          batas_minimum: item.stok_minimal,
+          satuan: item.satuan?.nama_satuan,
+          status: item.stok <= 0 ? "HABIS" : "MENIPIS"
+        });
+      }
     });
 
-  } catch (error) {
-    res.status(500).json({ message: error.message });
-  }
-};
+    // --- B. CEK STOK PER CABANG (Hitung Manual: Masuk - Keluar) ---
+    cabangList.forEach((cabang) => {
+      bahanList.forEach((item) => {
+        // 1. Hitung Total Masuk ke Cabang ini
+        const totalMasuk = logMasuk
+          .filter(m => m.cabang_id === cabang.id && m.bahan_id === item.id)
+          .reduce((sum, current) => sum + current.jumlah, 0);
 
-// --- 2. LAPORAN TOTAL ORDER PER CABANG ---
-export const getBranchOrderStats = async (req, res) => {
-  try {
-    // Ambil data bahan_masuk yang statusnya sudah 'delivered' (sudah diterima cabang)
-    // Atau 'approved' tergantung aturan bisnis kamu. Di sini saya pakai 'approved'.
-    const { data: orders, error } = await supabase
-      .from("bahan_masuk")
-      .select(`
-        id,
-        jumlah,
-        created_at,
-        bahan:bahan_baku(nama_bahan, satuan:satuan_bahan(nama_satuan)),
-        cabang:users!bahan_masuk_cabang_id_fkey(id, name)
-      `)
-      .in('status', ['disetujui', 'delivered']); // Hanya hitung yang valid
+        // 2. Hitung Total Keluar/Terpakai oleh Cabang ini
+        const totalKeluar = logKeluar
+          .filter(k => k.action_by === cabang.id && k.bahan_id === item.id)
+          .reduce((sum, current) => sum + current.jumlah, 0);
 
-    if (error) throw error;
+        // 3. Stok Akhir Cabang
+        const stokCabang = totalMasuk - totalKeluar;
 
-    // PENGELOMPOKAN DATA (Grouping by Cabang)
-    // Kita olah data mentah menjadi format laporan yang rapi
-    const report = {};
-
-    orders.forEach((order) => {
-      const branchName = order.cabang?.name || "Unknown Branch";
-      const branchId = order.cabang?.id;
-
-      if (!report[branchName]) {
-        report[branchName] = {
-          cabang_id: branchId,
-          cabang_name: branchName,
-          total_transaksi: 0,
-          detail_bahan: {}
-        };
-      }
-
-      report[branchName].total_transaksi += 1;
-
-      // Grouping per bahan di dalam cabang tersebut
-      const bahanName = order.bahan?.nama_bahan;
-      if (!report[branchName].detail_bahan[bahanName]) {
-        report[branchName].detail_bahan[bahanName] = {
-          jumlah_total: 0,
-          satuan: order.bahan?.satuan?.nama_satuan
-        };
-      }
-      
-      report[branchName].detail_bahan[bahanName].jumlah_total += order.jumlah;
+        // 4. Cek apakah menipis (Menggunakan standar stok_minimal global)
+        // Note: Stok cabang bisa negatif jika lupa input barang masuk tapi sudah input keluar
+        if (stokCabang <= item.stok_minimal) {
+          allAlerts.push({
+            lokasi: cabang.name, // Nama Cabang (misal: "Cabang Jakarta")
+            cabang_id: cabang.id,
+            nama_bahan: item.nama_bahan,
+            sisa_stok: stokCabang,
+            batas_minimum: item.stok_minimal,
+            satuan: item.satuan?.nama_satuan,
+            status: stokCabang <= 0 ? "HABIS" : "MENIPIS"
+          });
+        }
+      });
     });
 
-    // Convert Object ke Array supaya lebih enak dikonsumsi Frontend
-    const finalReport = Object.values(report).map(branch => ({
-      ...branch,
-      detail_bahan: Object.entries(branch.detail_bahan).map(([key, val]) => ({
-        nama_bahan: key,
-        ...val
-      }))
-    }));
-
     res.json({
-      message: "Laporan order cabang berhasil dibuat",
-      data: finalReport
+      message: "Data alert stok berhasil diambil",
+      total_alerts: allAlerts.length,
+      data: allAlerts
     });
 
   } catch (error) {
