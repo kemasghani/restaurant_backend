@@ -1,52 +1,54 @@
 import supabase from "../config/db.js";
 
 // --- 1. NOTIFIKASI STOK MENIPIS (GUDANG PUSAT & CABANG) ---
+// controllers/dashboardController.js
+
 export const getLowStockAlerts = async (req, res) => {
   try {
+    // 1. Ambil Data Master
     const [bahanRes, cabangRes, masukRes, keluarRes] = await Promise.all([
-      supabase.from("bahan_baku").select("id, nama_bahan, stok, stok_minimal, satuan:satuan_bahan(nama_satuan)"),
+      // Kita tetap ambil stok_minimal untuk acuan
+      supabase.from("bahan_baku").select("id, nama_bahan, stok_minimal, satuan:satuan_bahan(nama_satuan)"), 
       supabase.from("users").select("id, name").eq("role", "cabang"),
       supabase.from("bahan_masuk").select("bahan_id, cabang_id, jumlah"),
       supabase.from("bahan_keluar").select("bahan_id, action_by, jumlah")
     ]);
 
     if (bahanRes.error) throw bahanRes.error;
-    
+
     const allAlerts = [];
     const bahanList = bahanRes.data;
     const cabangList = cabangRes.data || [];
     const logMasuk = masukRes.data || [];
     const logKeluar = keluarRes.data || [];
 
-    // A. Stok Gudang Pusat
-    bahanList.forEach((item) => {
-      if (item.stok <= item.stok_minimal) {
-        allAlerts.push({
-          lokasi: "GUDANG PUSAT",
-          cabang_id: null,
-          nama_bahan: item.nama_bahan,
-          sisa_stok: item.stok,
-          batas_minimum: item.stok_minimal,
-          satuan: item.satuan?.nama_satuan,
-          status: item.stok <= 0 ? "HABIS" : "MENIPIS"
-        });
-      }
-    });
+    // --- HAPUS LOGIKA GUDANG PUSAT (SECTION A) ---
+    // Kita langsung masuk ke logika Cabang
 
-    // B. Stok Cabang
+    // --- LOGIKA CEK STOK PER CABANG ---
     cabangList.forEach((cabang) => {
       bahanList.forEach((item) => {
+        // 1. Hitung Total Masuk ke Cabang ini
         const totalMasuk = logMasuk
           .filter(m => m.cabang_id === cabang.id && m.bahan_id === item.id)
           .reduce((sum, cur) => sum + cur.jumlah, 0);
 
+        // 2. Hitung Total Keluar dari Cabang ini
         const totalKeluar = logKeluar
           .filter(k => k.action_by === cabang.id && k.bahan_id === item.id)
           .reduce((sum, cur) => sum + cur.jumlah, 0);
 
+        // 3. Stok Real Cabang
         const stokCabang = totalMasuk - totalKeluar;
 
+        // 4. Cek apakah menipis
+        // Jika stok cabang <= stok minimal master, dan stok cabang tersebut memang pernah ada transaksi (opsional)
         if (stokCabang <= item.stok_minimal) {
+          
+          // Opsional: Jika Anda tidak ingin menampilkan alert untuk barang yang stoknya 0 
+          // karena memang belum pernah dikirim ke cabang tersebut, tambahkan kondisi:
+          // if (stokCabang === 0 && totalMasuk === 0) return; 
+
           allAlerts.push({
             lokasi: cabang.name,
             cabang_id: cabang.id,
@@ -61,7 +63,7 @@ export const getLowStockAlerts = async (req, res) => {
     });
 
     res.json({
-      message: "Data alert stok berhasil diambil",
+      message: "Data alert stok cabang berhasil diambil",
       total_alerts: allAlerts.length,
       data: allAlerts
     });
@@ -70,7 +72,6 @@ export const getLowStockAlerts = async (req, res) => {
     res.status(500).json({ message: error.message });
   }
 };
-
 // --- 2. LAPORAN TOTAL ORDER PER CABANG ---
 export const getBranchOrderStats = async (req, res) => {
   try {
