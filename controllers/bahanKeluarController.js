@@ -1,14 +1,19 @@
 import supabase from "../config/db.js";
 
 export const listBahanKeluar = async (req, res) => {
-  const { data, error } = await supabase
+  const user = req.user;
+  let query = supabase
     .from("bahan_keluar")
     .select(`
       *,
       bahan_baku (nama_bahan),
-      users (name)
+      user:users!bahan_keluar_action_by_fkey (name)
     `)
     .order("created_at", { ascending: false });
+
+  query = query.eq("action_by", user.id);
+
+  const { data, error } = await query;
 
   if (error) return res.status(500).json({ message: error.message });
   res.json(data);
