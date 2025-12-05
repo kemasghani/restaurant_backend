@@ -3,7 +3,6 @@ import supabase from "../config/db.js";
 // --- 1. NOTIFIKASI STOK MENIPIS (GUDANG PUSAT & CABANG) ---
 export const getLowStockAlerts = async (req, res) => {
   try {
-    // 1. Ambil Data Master (Bahan, Cabang, Transaksi) secara paralel agar cepat
     const [bahanRes, cabangRes, masukRes, keluarRes] = await Promise.all([
       supabase.from("bahan_baku").select("id, nama_bahan, stok, stok_minimal, satuan:satuan_bahan(nama_satuan)"),
       supabase.from("users").select("id, name").eq("role", "cabang"),
@@ -12,15 +11,14 @@ export const getLowStockAlerts = async (req, res) => {
     ]);
 
     if (bahanRes.error) throw bahanRes.error;
-    if (cabangRes.error) throw cabangRes.error;
-
+    
     const allAlerts = [];
     const bahanList = bahanRes.data;
-    const cabangList = cabangRes.data;
+    const cabangList = cabangRes.data || [];
     const logMasuk = masukRes.data || [];
     const logKeluar = keluarRes.data || [];
 
-    // --- A. CEK STOK GUDANG PUSAT (Dari tabel bahan_baku) ---
+    // A. Stok Gudang Pusat
     bahanList.forEach((item) => {
       if (item.stok <= item.stok_minimal) {
         allAlerts.push({
@@ -35,27 +33,22 @@ export const getLowStockAlerts = async (req, res) => {
       }
     });
 
-    // --- B. CEK STOK PER CABANG (Hitung Manual: Masuk - Keluar) ---
+    // B. Stok Cabang
     cabangList.forEach((cabang) => {
       bahanList.forEach((item) => {
-        // 1. Hitung Total Masuk ke Cabang ini
         const totalMasuk = logMasuk
           .filter(m => m.cabang_id === cabang.id && m.bahan_id === item.id)
-          .reduce((sum, current) => sum + current.jumlah, 0);
+          .reduce((sum, cur) => sum + cur.jumlah, 0);
 
-        // 2. Hitung Total Keluar/Terpakai oleh Cabang ini
         const totalKeluar = logKeluar
           .filter(k => k.action_by === cabang.id && k.bahan_id === item.id)
-          .reduce((sum, current) => sum + current.jumlah, 0);
+          .reduce((sum, cur) => sum + cur.jumlah, 0);
 
-        // 3. Stok Akhir Cabang
         const stokCabang = totalMasuk - totalKeluar;
 
-        // 4. Cek apakah menipis (Menggunakan standar stok_minimal global)
-        // Note: Stok cabang bisa negatif jika lupa input barang masuk tapi sudah input keluar
         if (stokCabang <= item.stok_minimal) {
           allAlerts.push({
-            lokasi: cabang.name, // Nama Cabang (misal: "Cabang Jakarta")
+            lokasi: cabang.name,
             cabang_id: cabang.id,
             nama_bahan: item.nama_bahan,
             sisa_stok: stokCabang,
@@ -71,6 +64,72 @@ export const getLowStockAlerts = async (req, res) => {
       message: "Data alert stok berhasil diambil",
       total_alerts: allAlerts.length,
       data: allAlerts
+    });
+
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
+
+// --- 2. LAPORAN TOTAL ORDER PER CABANG ---
+export const getBranchOrderStats = async (req, res) => {
+  try {
+    const { data: orders, error } = await supabase
+      .from("bahan_masuk")
+      .select(`
+        id,
+        jumlah,
+        created_at,
+        bahan:bahan_baku(nama_bahan, satuan:satuan_bahan(nama_satuan)),
+        cabang:users!bahan_masuk_cabang_id_fkey(id, name)
+      `)
+      // Hanya hitung yang valid, sesuaikan status dengan data kamu (misal: 'completed', 'delivered', atau 'approved')
+      // .in('status', ['disetujui', 'delivered']); 
+      // Jika tidak ada filter status, hapus baris .in() di atas
+
+    if (error) throw error;
+
+    const report = {};
+
+    orders.forEach((order) => {
+      // Skip jika tidak ada data cabang (misal data lama/corrupt)
+      if (!order.cabang) return;
+
+      const branchName = order.cabang.name;
+      
+      if (!report[branchName]) {
+        report[branchName] = {
+          cabang_id: order.cabang.id,
+          cabang_name: branchName,
+          total_transaksi: 0,
+          detail_bahan: {}
+        };
+      }
+
+      report[branchName].total_transaksi += 1;
+
+      const bahanName = order.bahan?.nama_bahan || "Unknown Item";
+      if (!report[branchName].detail_bahan[bahanName]) {
+        report[branchName].detail_bahan[bahanName] = {
+          jumlah_total: 0,
+          satuan: order.bahan?.satuan?.nama_satuan || '-'
+        };
+      }
+      
+      report[branchName].detail_bahan[bahanName].jumlah_total += order.jumlah;
+    });
+
+    const finalReport = Object.values(report).map(branch => ({
+      ...branch,
+      detail_bahan: Object.entries(branch.detail_bahan).map(([key, val]) => ({
+        nama_bahan: key,
+        ...val
+      }))
+    }));
+
+    res.json({
+      message: "Laporan order cabang berhasil dibuat",
+      data: finalReport
     });
 
   } catch (error) {
