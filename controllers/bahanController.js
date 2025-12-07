@@ -55,7 +55,6 @@ export const getAllBahan = async (req, res) => {
 export const addBahan = async (req, res) => {
   // Removed 'stok' from input, added 'stok_minimal'
   const { nama_bahan, kategori_id, satuan_id, stok_minimal } = req.body;
-  const userId = req.user.id;
 
   const { error } = await supabase.from("bahan_baku").insert([
     {
@@ -64,7 +63,6 @@ export const addBahan = async (req, res) => {
       satuan_id,
       stok: 0, // Auto set stok to 0
       stok_minimal: stok_minimal || 0, // Default to 0 if not provided
-      created_by: userId,
     },
   ]);
 
