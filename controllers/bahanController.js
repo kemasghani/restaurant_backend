@@ -53,15 +53,25 @@ export const getAllBahan = async (req, res) => {
 };
 
 export const addBahan = async (req, res) => {
-  // Removed 'stok' from input, added 'stok_minimal'
-  const { nama_bahan, kategori_id, satuan_id, stok_minimal } = req.body;
+  // Added 'stok' back to the destructuring for checking its value
+  const { nama_bahan, kategori_id, satuan_id, stok_minimal, stok } = req.body;
+
+  // Determine the 'initialStok' value
+  let initialStok = stok;
+
+  // Check if 'stok' is explicitly null, and set it to 0 in that case.
+  // If 'stok' is undefined (not provided) or has a value (e.g., 5), that value is used.
+  if (stok === null) {
+    initialStok = 0;
+  }
 
   const { error } = await supabase.from("bahan_baku").insert([
     {
       nama_bahan,
       kategori_id,
       satuan_id,
-      stok: 0, // Auto set stok to 0
+      // Use the determined initialStok
+      stok: initialStok || 0, // Default to 0 if initialStok is undefined/falsy
       stok_minimal: stok_minimal || 0, // Default to 0 if not provided
     },
   ]);
@@ -73,7 +83,7 @@ export const addBahan = async (req, res) => {
 export const updateBahan = async (req, res) => {
   const { id } = req.params;
   // Removed 'stok' from input so it cannot be edited here
-  const { nama_bahan, kategori_id, satuan_id, stok_minimal } = req.body;
+  const { nama_bahan, kategori_id, satuan_id, stok_minimal, stok } = req.body;
 
   const { data: existing } = await supabase
     .from("bahan_baku")
@@ -89,7 +99,8 @@ export const updateBahan = async (req, res) => {
       nama_bahan,
       kategori_id,
       satuan_id,
-      stok_minimal, // Only update stok_minimal
+      stok_minimal,
+      stok
     })
     .eq("id", id);
 
